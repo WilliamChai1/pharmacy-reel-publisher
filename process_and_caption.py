@@ -94,7 +94,7 @@ def process_video(lang="en"):
     if os.path.exists("bgm.mp3"):
         cmd_bgm = (
             f'ffmpeg -y -i {stitched_temp} -stream_loop -1 -i bgm.mp3 '
-            f'-filter_complex "[1:a]volume=0.12[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" '
+            f'-filter_complex "[1:a]volume=0.10[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" '
             f'-map 0:v -map "[aout]" -c:v copy -c:a aac -b:a 192k -ar 44100 {final_output}'
         )
         subprocess.run(cmd_bgm, shell=True, check=True)
