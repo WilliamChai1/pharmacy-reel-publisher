@@ -1,0 +1,52 @@
+name: Process Reel & Generate Caption
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Video Educational Topic'
+        required: true
+        default: 'Liquid medicine safety for kids and why kitchen spoons are dangerous'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          pip install google-genai
+
+      - name: Run Pipeline
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VIDEO_TOPIC: ${{ github.event.inputs.topic }}
+        run: |
+          python process_and_caption.py
+
+      - name: Upload Video Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean_pharmacy_reel
+          path: clean_pharmacy_reel.mp4
+          retention-days: 5
+
+      - name: Upload Caption Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook_caption
+          path: caption.txt
+          retention-days: 5
