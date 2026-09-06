@@ -28,7 +28,8 @@ jobs:
 
       - name: Install Python Dependencies
         run: |
-          pip install edge-tts moviepy requests pillow google-genai
+          pip install --upgrade pip
+          pip install edge-tts "moviepy>=2.0.0" requests pillow google-genai
 
       - name: Run Animation Generator
         env:
