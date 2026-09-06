@@ -21,16 +21,15 @@ def process_video(lang="en"):
     cut_duration = max(1.0, total_dur - 3.0)
     trimmed_body = "trimmed_body.mp4"
 
-    # 1. Subtle blue retention progress bar at top (8px)
-    progress_bar = f"drawbox=y=0:x=0:w='iw*(t/{cut_duration})':h=8:color=0x0284C7@1:t=fill"
-
-    # 2. Perfect Watermark Placement:
-    # "Gemini Notebook" sits at the bottom right.
-    # We place your avatar scaled to 220px at: x=W-w-30, y=H-h-25
+    # --- TRUE ANIMATED PROGRESS BAR ---
+    # Creates a 14px cyan bar that expands across the top from 0 to 1080px over cut_duration
+    # Also places avatar over "Gemini Notebook" watermark at bottom right
     if os.path.exists("avatar.png"):
         filter_str = (
             f"[1:v]scale=220:-1[logo];"
-            f"[0:v][logo]overlay=W-w-30:H-h-25,{progress_bar}"
+            f"color=c=0x0284C7:s=1080x14,format=rgba[bar];"
+            f"[0:v][bar]overlay=x='-W+(W*t/{cut_duration})':y=0[with_bar];"
+            f"[with_bar][logo]overlay=W-w-30:H-h-25"
         )
         cmd_trim = (
             f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} -i avatar.png '
@@ -39,24 +38,27 @@ def process_video(lang="en"):
             f'-c:a aac -b:a 192k -ar 44100 -ac 2 -async 1 {trimmed_body}'
         )
     else:
+        filter_str = (
+            f"color=c=0x0284C7:s=1080x14,format=rgba[bar];"
+            f"[0:v][bar]overlay=x='-W+(W*t/{cut_duration})':y=0"
+        )
         cmd_trim = (
             f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} '
-            f'-vf "{progress_bar}" '
+            f'-filter_complex "{filter_str}" '
             f'-r 30 -c:v libx264 -preset fast -crf 20 '
             f'-c:a aac -b:a 192k -ar 44100 -ac 2 -async 1 {trimmed_body}'
         )
 
-    print("Step 1: Trimming body, positioning avatar over watermark, syncing audio...")
+    print("Step 1: Trimming body, placing avatar, generating dynamic moving progress bar...")
     subprocess.run(cmd_trim, shell=True, check=True)
 
-    # 3. Standardize Intro and Outro (Standardizes 1080x1920, 30fps, 44.1kHz audio)
+    # 3. Standardize Intro and Outro
     intro_file = f"intro_{lang}.mp4"
     outro_file = f"outro_{lang}.mp4"
 
     segments_to_concat = []
 
     def standardize_clip(src, dest):
-        # Normalizes resolution, framerate, and audio track so concat never loses sync
         cmd = (
             f'ffmpeg -y -i {src} -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 '
             f'-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1[v];'
@@ -70,7 +72,6 @@ def process_video(lang="en"):
         standardize_clip(intro_file, "norm_intro.mp4")
         segments_to_concat.append("norm_intro.mp4")
 
-    # Standardize body to ensure matching stream properties
     print("Standardizing trimmed body...")
     standardize_clip(trimmed_body, "norm_body.mp4")
     segments_to_concat.append("norm_body.mp4")
@@ -89,7 +90,7 @@ def process_video(lang="en"):
     cmd_concat = f'ffmpeg -y -f concat -safe 0 -i concat_list.txt -c:v copy -c:a copy {stitched_temp}'
     subprocess.run(cmd_concat, shell=True, check=True)
 
-    # 5. Mix Background Music (BGM) ducked at 12%
+    # 5. Mix Background Music (ducked to 0.10)
     final_output = "clean_pharmacy_reel.mp4"
     if os.path.exists("bgm.mp3"):
         cmd_bgm = (
@@ -101,7 +102,7 @@ def process_video(lang="en"):
     else:
         os.rename(stitched_temp, final_output)
 
-    print(f"Video finalized successfully: {final_output}")
+    print(f"Video finalized successfully with animated progress bar: {final_output}")
 
 def generate_caption(topic, lang="en"):
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
