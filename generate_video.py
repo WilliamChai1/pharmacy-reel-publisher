@@ -10,7 +10,7 @@ from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 
 # --- 1. GEMINI SCRIPT & PROMPT GENERATOR ---
 def generate_storyboard(topic: str) -> list:
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(api_key=os.environ["AQ.Ab8RN6KNgZ3OIXpPMWggsdWADa-99bqGP9Ez9YFeDmIX8LU-sQ"])
     
     prompt = f"""
     Create a lively, educational 3D animated video storyboard for children (aged 5-8) and their parents.
