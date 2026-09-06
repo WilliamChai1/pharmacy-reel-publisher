@@ -1,14 +1,94 @@
+import os
+import sys
+import subprocess
+from google import genai
+
+WHATSAPP_PHONE = "+601110990693"
+WHATSAPP_GROUP = "https://chat.whatsapp.com/D1d7scuEzrQ15rwFndmSHr"
+
+def get_video_duration(path):
+    cmd = f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {path}"
+    return float(subprocess.check_output(cmd, shell=True).decode().strip())
+
+def process_video(lang="en"):
+    input_video = "input.mp4"
+    if not os.path.exists(input_video):
+        print("ERROR: input.mp4 not found!")
+        sys.exit(1)
+
+    total_dur = get_video_duration(input_video)
+    cut_duration = max(1.0, total_dur - 3.0)
+    trimmed_body = "trimmed_body.mp4"
+
+    # Subtle cyan retention progress bar (8px at top)
+    progress_bar = f"drawbox=y=0:x=0:w='iw*(t/{cut_duration})':h=8:color=0x0284C7@1:t=fill"
+
+    if os.path.exists("avatar.png"):
+        filter_str = f"[1:v]scale=130:130[logo];[0:v][logo]overlay=W-w-25:H-h-160,{progress_bar}"
+        cmd_trim = (
+            f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} -i avatar.png '
+            f'-filter_complex "{filter_str}" '
+            f'-c:v libx264 -preset fast -crf 20 -c:a aac {trimmed_body}'
+        )
+    else:
+        cmd_trim = (
+            f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} '
+            f'-vf "{progress_bar}" '
+            f'-c:v libx264 -preset fast -crf 20 -c:a aac {trimmed_body}'
+        )
+    
+    print("Trimming outro, placing avatar, and adding retention progress bar...")
+    subprocess.run(cmd_trim, shell=True, check=True)
+
+    # Stitch intro + body + outro
+    intro_file = f"intro_{lang}.mp4"
+    outro_file = f"outro_{lang}.mp4"
+
+    segments = []
+    if os.path.exists(intro_file):
+        segments.append(intro_file)
+    segments.append(trimmed_body)
+    if os.path.exists(outro_file):
+        segments.append(outro_file)
+
+    with open("concat_list.txt", "w") as f:
+        for s in segments:
+            f.write(f"file '{s}'\n")
+
+    stitched_temp = "stitched_temp.mp4"
+    cmd_concat = f'ffmpeg -y -f concat -safe 0 -i concat_list.txt -c:v libx264 -preset fast -crf 20 -c:a aac {stitched_temp}'
+    subprocess.run(cmd_concat, shell=True, check=True)
+
+    # Mix BGM ducked underneath
+    final_output = "clean_pharmacy_reel.mp4"
+    if os.path.exists("bgm.mp3"):
+        cmd_bgm = (
+            f'ffmpeg -y -i {stitched_temp} -stream_loop -1 -i bgm.mp3 '
+            f'-filter_complex "[1:a]volume=0.12[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" '
+            f'-map 0:v -map "[aout]" -c:v copy -c:a aac -b:a 192k {final_output}'
+        )
+        subprocess.run(cmd_bgm, shell=True, check=True)
+    else:
+        os.rename(stitched_temp, final_output)
+
+    print(f"Video created successfully: {final_output}")
+
 def generate_caption(topic, lang="en"):
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    
     if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is not set!")
+        print("WARNING: GEMINI_API_KEY is empty. Using fallback placeholder caption.")
+        caption_text = f"Health Tip: {topic}\n\nJoin our community: {WHATSAPP_GROUP}\nConsult us at WhatsApp: {WHATSAPP_PHONE}"
+        with open("caption.txt", "w", encoding="utf-8") as f:
+            f.write(caption_text)
+        return
 
     client = genai.Client(api_key=api_key)
 
     if lang == "zh":
         prompt = f"""
         你是一位在古晋（Kuching, Sarawak）深受大众信任、亲切专业的社区药剂师。
-        请为这一部 60 至 90 秒的儿童/家庭健康教育动画短视频写一篇高吸引力、高转化率的 Facebook 贴文文案。
+        请为这一部 60 至 90 秒的儿童/家庭健康教育短视频写一篇高吸引力、高转化率的 Facebook 贴文文案。
         
         短片主题：{topic}
         目标受众：古晋的爸爸妈妈、爷爷奶奶与家庭照顾者。
@@ -43,7 +123,8 @@ def generate_caption(topic, lang="en"):
         Tone: Professional, warm, localized, and encouraging.
         """
 
-    # --- PRIMARY MODEL: gemini-3.5-flash-lite ---
+    caption_text = ""
+    # 1. Primary: gemini-3.5-flash-lite
     try:
         print("Calling Primary Model: gemini-3.5-flash-lite...")
         res = client.models.generate_content(
@@ -51,91 +132,27 @@ def generate_caption(topic, lang="en"):
             contents=prompt,
         )
         caption_text = res.text
-        print("✅ Caption generated successfully using gemini-3.5-flash-lite.")
-    except Exception as err_lite:
-        print(f"⚠️ Primary model (gemini-3.5-flash-lite) error: {err_lite}")
-        print("Switching to Secondary Model: gemini-3.5-flash...")
-        
-        # --- SECONDARY FALLBACK: gemini-3.5-flash ---
+        print("Primary model succeeded.")
+    except Exception as e1:
+        print(f"Primary model failed: {e1}. Switching to secondary: gemini-3.5-flash...")
+        # 2. Secondary fallback: gemini-3.5-flash
         try:
             res = client.models.generate_content(
                 model="gemini-3.5-flash",
                 contents=prompt,
             )
             caption_text = res.text
-            print("✅ Caption generated successfully using secondary model (gemini-3.5-flash).")
-        except Exception as err_flash:
-            print(f"❌ Both models failed: {err_flash}")
-            raise err_flash
+            print("Secondary model succeeded.")
+        except Exception as e2:
+            print(f"Secondary model failed: {e2}")
+            caption_text = f"Health Tip: {topic}\n\nJoin our community: {WHATSAPP_GROUP}\nContact pharmacist: {WHATSAPP_PHONE}"
 
     with open("caption.txt", "w", encoding="utf-8") as f:
         f.write(caption_text)
-        
-def process_video(lang="en"):
-    input_video = "input.mp4"
-    if not os.path.exists(input_video):
-        raise FileNotFoundError("input.mp4 not found!")
+    print("caption.txt successfully written.")
 
-    total_dur = get_video_duration(input_video)
-    # Cut 3.0 seconds off the end to remove NotebookLM outro bumper
-    cut_duration = max(1.0, total_dur - 3.0)
-    trimmed_body = "trimmed_body.mp4"
-
-    # --- ADVANCED RETENTION FILTERS ---
-    # 1. Overlay avatar at bottom right over watermark
-    # 2. Dynamic progress bar at the very top (height: 8px, vibrant cyan color)
-    progress_bar_filter = (
-        f"drawbox=y=0:x=0:w='iw*(t/{cut_duration})':h=8:color=0x0284C7@1:t=fill"
-    )
-
-    if os.path.exists("avatar.png"):
-        filter_str = (
-            f"[1:v]scale=130:130[logo];"
-            f"[0:v][logo]overlay=W-w-25:H-h-160,{progress_bar_filter}"
-        )
-        cmd_trim = (
-            f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} -i avatar.png '
-            f'-filter_complex "{filter_str}" '
-            f'-c:v libx264 -preset fast -crf 20 -c:a aac {trimmed_body}'
-        )
-    else:
-        cmd_trim = (
-            f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} '
-            f'-vf "{progress_bar_filter}" '
-            f'-c:v libx264 -preset fast -crf 20 -c:a aac {trimmed_body}'
-        )
-
-    subprocess.run(cmd_trim, shell=True, check=True)
-
-    # Stitch Intro + Trimmed Body + Outro
-    intro_file = f"intro_{lang}.mp4"
-    outro_file = f"outro_{lang}.mp4"
-
-    segments = []
-    if os.path.exists(intro_file):
-        segments.append(intro_file)
-    segments.append(trimmed_body)
-    if os.path.exists(outro_file):
-        segments.append(outro_file)
-
-    with open("concat_list.txt", "w") as f:
-        for s in segments:
-            f.write(f"file '{s}'\n")
-
-    stitched_temp = "stitched_temp.mp4"
-    cmd_concat = f'ffmpeg -y -f concat -safe 0 -i concat_list.txt -c:v libx264 -preset fast -crf 20 -c:a aac {stitched_temp}'
-    subprocess.run(cmd_concat, shell=True, check=True)
-
-    # Mix soft background music ducked underneath narration
-    final_output = "clean_pharmacy_reel.mp4"
-    if os.path.exists("bgm.mp3"):
-        cmd_bgm = (
-            f'ffmpeg -y -i {stitched_temp} -stream_loop -1 -i bgm.mp3 '
-            f'-filter_complex "[1:a]volume=0.12[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" '
-            f'-map 0:v -map "[aout]" -c:v copy -c:a aac -b:a 192k {final_output}'
-        )
-        subprocess.run(cmd_bgm, shell=True, check=True)
-    else:
-        os.rename(stitched_temp, final_output)
-
-    print(f"Video rendering finished with retention progress bar for: {lang}")
+if __name__ == "__main__":
+    topic = os.environ.get("VIDEO_TOPIC", "Liquid medicine safety")
+    lang = os.environ.get("VIDEO_LANG", "en")
+    process_video(lang)
+    generate_caption(topic, lang)
