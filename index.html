@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pharmacy Reel Hub</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; margin: 0; padding: 20px; color: #1e293b; }
-    .card { background: white; border-radius: 16px; padding: 22px; max-width: 500px; margin: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; margin: 0; padding: 16px; color: #1e293b; }
+    .card { background: white; border-radius: 16px; padding: 20px; max-width: 480px; margin: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
     h2 { margin-top: 0; color: #0284c7; font-size: 20px; }
     label { font-weight: 600; font-size: 13px; display: block; margin-top: 14px; }
     input, select, textarea, button { width: 100%; box-sizing: border-box; border-radius: 10px; margin-top: 6px; }
@@ -14,7 +14,7 @@
     textarea { height: 220px; line-height: 1.4; }
     button { background: #0284c7; color: white; border: none; padding: 14px; font-weight: 600; font-size: 15px; cursor: pointer; margin-top: 16px; border-radius: 10px; }
     button:disabled { background: #94a3b8; }
-    .status { font-size: 13px; color: #64748b; margin-top: 12px; font-weight: 500; line-height: 1.4; }
+    .status { font-size: 13px; color: #64748b; margin-top: 12px; font-weight: 500; line-height: 1.4; word-break: break-all; }
     .btn-green { background: #16a34a; }
     .btn-secondary { background: #475569; }
     .settings-toggle { font-size: 12px; color: #94a3b8; text-decoration: underline; cursor: pointer; margin-top: 20px; display: inline-block; }
@@ -34,7 +34,7 @@
     </select>
 
     <label>Video Topic (for Gemini 3.5 Caption):</label>
-    <input type="text" id="videoTopic" value="Why kitchen spoons are dangerous for kids and how to dose syrup easily">
+    <input type="text" id="videoTopic" value="Why kitchen spoons are dangerous for kids">
 
     <label>Select NotebookLM Video (.mp4):</label>
     <input type="file" id="videoFile" accept="video/mp4">
@@ -50,15 +50,15 @@
 
     <div id="downloadContainer" style="display: none; margin-top: 12px;">
       <a id="downloadBtnLink" href="#" target="_blank" style="text-decoration:none;">
-        <button class="btn-green">📥 Open Run Page to Download Video (.zip)</button>
+        <button class="btn-green">📥 Open GitHub to Download Video (.zip)</button>
       </a>
-      <p style="font-size: 12px; color: #64748b; margin-top: 6px; text-align: center;">(Scroll to the bottom of the opened GitHub page and click <b>clean_pharmacy_reel</b>)</p>
+      <p style="font-size: 12px; color: #64748b; margin-top: 6px; text-align: center;">(Click <b>clean_pharmacy_reel</b> at bottom of GitHub page)</p>
     </div>
 
     <!-- Hidden Token Settings -->
     <span class="settings-toggle" onclick="toggleSettings()">⚙️ Token Settings</span>
     <div id="tokenArea">
-      <label style="margin-top:0;">GitHub PAT (Stored in this browser):</label>
+      <label style="margin-top:0;">GitHub PAT (Saved on this phone):</label>
       <input type="password" id="githubToken" placeholder="Paste ghp_xxxx here">
       <button onclick="saveToken()" style="padding: 8px; margin-top: 8px; background: #334155;">Save Token</button>
     </div>
@@ -67,8 +67,7 @@
   <script>
     const REPO = "WilliamChai1/pharmacy-reel-publisher";
 
-    const savedToken = localStorage.getItem("gh_pat") || "";
-    document.getElementById("githubToken").value = savedToken;
+    document.getElementById("githubToken").value = localStorage.getItem("gh_pat") || "";
 
     function toggleSettings() {
       const area = document.getElementById("tokenArea");
@@ -106,7 +105,7 @@
       const fileInput = document.getElementById("videoFile").files[0];
 
       if (!token) {
-        alert("Please tap '⚙️ Token Settings' below and save your GitHub Token first.");
+        alert("Please tap '⚙️ Token Settings' and save your GitHub Token first.");
         toggleSettings();
         return;
       }
@@ -119,7 +118,7 @@
       btn.disabled = true;
 
       try {
-        updateStatus("⏳ 1/3 Uploading video file to GitHub (this may take 15-30s depending on file size)...");
+        updateStatus("⏳ 1/3 Uploading video file to GitHub (takes 10-25s)...");
         
         const reader = new FileReader();
         reader.readAsDataURL(fileInput);
@@ -128,11 +127,12 @@
           
           let sha = "";
           try {
-            const checkRes = await fetch(`https://api.github.com/repos/${REPO}/contents/input.mp4`, {
+            const checkRes = await fetch(`https://api.github.com/repos/${REPO}/contents/input.mp4?t=${Date.now()}`, {
               headers: { 
                 "Authorization": `Bearer ${token}`,
                 "Accept": "application/vnd.github+json"
-              }
+              },
+              cache: "no-store"
             });
             if (checkRes.ok) {
               const data = await checkRes.json();
@@ -156,10 +156,10 @@
 
           if (!uploadRes.ok) {
             const errData = await uploadRes.json();
-            throw new Error(`Upload failed: ${errData.message || 'File might be larger than GitHub API limit'}`);
+            throw new Error(`Upload failed: ${errData.message || 'Check token permissions'}`);
           }
 
-          updateStatus("⏳ 2/3 Video uploaded! Starting cloud processing...");
+          updateStatus("⏳ 2/3 Video uploaded! Starting cloud server...");
           
           const dispatchRes = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/process.yml/dispatches`, {
             method: "POST",
@@ -179,8 +179,9 @@
             throw new Error(`Failed to trigger workflow: ${dispErr.message}`);
           }
 
-          updateStatus("⏳ 3/3 Processing video & generating Gemini 3.5 caption on cloud... (~40s)");
-          pollWorkflowStatus(token);
+          updateStatus("⏳ 3/3 Processing video on cloud... (~45s)");
+          // Wait 10 seconds before polling to let GitHub register the new run
+          setTimeout(() => pollWorkflowStatus(token), 10000);
         };
 
       } catch (err) {
@@ -194,50 +195,71 @@
       const interval = setInterval(async () => {
         attempts++;
         try {
-          const runsRes = await fetch(`https://api.github.com/repos/${REPO}/actions/runs?per_page=1`, {
+          // Cache busting query parameter (?t=...) and no-store header to bypass mobile cache
+          const runsRes = await fetch(`https://api.github.com/repos/${REPO}/actions/runs?per_page=1&t=${Date.now()}`, {
             headers: { 
               "Authorization": `Bearer ${token}`,
               "Accept": "application/vnd.github+json"
-            }
+            },
+            cache: "no-store"
           });
+          
+          if (!runsRes.ok) return;
+
           const runsData = await runsRes.json();
           const latestRun = runsData.workflow_runs[0];
 
-          if (latestRun && latestRun.status === "completed") {
-            clearInterval(interval);
-            if (latestRun.conclusion === "success") {
-              updateStatus("✅ Success! Fetching generated caption and video link...");
-              document.getElementById("downloadContainer").style.display = "block";
-              document.getElementById("downloadBtnLink").href = latestRun.html_url;
-              fetchCaptionFile(token);
+          if (latestRun) {
+            if (latestRun.status === "completed") {
+              clearInterval(interval);
+              if (latestRun.conclusion === "success") {
+                updateStatus("✅ Success! Loading caption...");
+                document.getElementById("downloadContainer").style.display = "block";
+                document.getElementById("downloadBtnLink").href = latestRun.html_url;
+                fetchCaptionFile(token);
+              } else {
+                updateStatus(`❌ Cloud run failed. <a href="${latestRun.html_url}" target="_blank">View details on GitHub</a>`);
+                document.getElementById("actionBtn").disabled = false;
+              }
             } else {
-              updateStatus(`❌ Cloud run failed. <a href="${latestRun.html_url}" target="_blank">View Error Log on GitHub</a>`);
-              document.getElementById("actionBtn").disabled = false;
+              updateStatus(`⏳ Processing on cloud... (${attempts * 5 + 10}s) <br><span style="font-size:11px;color:#94a3b8;">Status: ${latestRun.status}</span>`);
             }
-          } else {
-            updateStatus(`⏳ Processing on cloud... (${attempts * 5}s elapsed)`);
           }
-        } catch(e) {}
+        } catch(e) {
+          console.error("Polling error: ", e);
+        }
       }, 5000);
     }
 
     async function fetchCaptionFile(token) {
       try {
-        const fileRes = await fetch(`https://api.github.com/repos/${REPO}/contents/caption.txt`, {
+        const fileRes = await fetch(`https://api.github.com/repos/${REPO}/contents/caption.txt?t=${Date.now()}`, {
           headers: { 
             "Authorization": `Bearer ${token}`,
             "Accept": "application/vnd.github+json"
-          }
+          },
+          cache: "no-store"
         });
+        
         if (fileRes.ok) {
           const data = await fileRes.json();
-          // Decode Base64 UTF-8 content
-          const decodedCaption = decodeURIComponent(escape(atob(data.content)));
+          
+          // UTF-8 binary decode (prevents emoji & Chinese decoding corruption)
+          const binaryString = atob(data.content.replace(/\s/g, ''));
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const decodedCaption = new TextDecoder('utf-8').decode(bytes);
+          
           document.getElementById("captionBox").value = decodedCaption;
-          updateStatus("🎉 Video & caption ready! Copy caption below and download your video.");
+          updateStatus("🎉 Video & caption ready! Tap 'Copy Caption' and download your video below.");
+        } else {
+          updateStatus("✅ Video ready! (Note: Caption file still syncing, check GitHub run if empty).");
         }
       } catch (err) {
-        console.log("Could not load caption directly: ", err);
+        console.error("Caption decoding error: ", err);
+        updateStatus("✅ Video ready! Tap button below to open download link.");
       }
       document.getElementById("actionBtn").disabled = false;
     }
