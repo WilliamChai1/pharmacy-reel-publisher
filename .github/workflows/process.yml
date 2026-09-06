@@ -7,6 +7,10 @@ on:
         description: 'Video Educational Topic'
         required: true
         default: 'Liquid medicine safety for kids and why kitchen spoons are dangerous'
+      language:
+        description: 'Language (en or zh)'
+        required: true
+        default: 'en'
 
 jobs:
   build:
@@ -34,6 +38,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           VIDEO_TOPIC: ${{ github.event.inputs.topic }}
+          VIDEO_LANG: ${{ github.event.inputs.language }}
         run: |
           python process_and_caption.py
 
