@@ -46,7 +46,6 @@ jobs:
             echo "::error::input.mp4 was not found in repo root! Please make sure the upload completed."
             exit 1
           fi
-          echo "Found input.mp4. Size:"
           ls -lh input.mp4
 
       - name: Run Processing & Caption Pipeline
@@ -69,22 +68,13 @@ jobs:
               git commit -m "chore: auto-update generated caption [skip ci]"
               git push origin main
             fi
-          else
-            echo "caption.txt not found, skipping commit."
           fi
 
-      - name: Upload Clean Video Artifact
-        uses: actions/upload-artifact@v4
+      - name: Publish Direct Video Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: clean_pharmacy_reel
-          path: clean_pharmacy_reel.mp4
-          if-no-files-found: error
-          retention-days: 5
-
-      - name: Upload Caption Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: facebook_caption
-          path: caption.txt
-          if-no-files-found: error
-          retention-days: 5
+          tag_name: latest
+          name: "Latest Cleaned Reel"
+          files: clean_pharmacy_reel.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
