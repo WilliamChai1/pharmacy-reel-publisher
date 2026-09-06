@@ -7,12 +7,13 @@ import edge_tts
 from google import genai
 from google.genai import types
 
-# Modern MoviePy v2 imports (No moviepy.editor)
+# Modern MoviePy v2 imports
 from moviepy import (
     ImageClip, 
     AudioFileClip, 
     CompositeAudioClip, 
-    concatenate_videoclips
+    concatenate_videoclips,
+    concatenate_audioclips
 )
 import moviepy.video.fx as vfx
 
@@ -49,15 +50,27 @@ def generate_storyboard(topic: str) -> list:
     ]
     """
     
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json"
-        )
-    )
+    # Strictly limited to Gemini 3.5 Flash Lite & Gemini 3.5 Flash
+    models_to_try = ["gemini-3.5-flash-lite", "gemini-3.5-flash"]
+    last_err = None
     
-    return json.loads(response.text)
+    for model_name in models_to_try:
+        try:
+            print(f"Calling model: {model_name}...")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"Model {model_name} returned error: {e}")
+            last_err = e
+            continue
+            
+    raise RuntimeError(f"Both Gemini 3.5 Flash Lite and 3.5 Flash calls failed. Details: {last_err}")
 
 # --- 2. TEXT-TO-SPEECH (Edge-TTS) ---
 async def create_voice(text: str, filename: str, voice: str = "en-US-AnaNeural"):
@@ -66,7 +79,6 @@ async def create_voice(text: str, filename: str, voice: str = "en-US-AnaNeural")
 
 # --- 3. BACKGROUND MUSIC DOWNLOADER ---
 def download_bgm(bgm_path="bgm.mp3"):
-    # Download a royalty-free playful acoustic track
     bgm_url = "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=baby-mandala-111166.mp3"
     if not os.path.exists(bgm_path):
         print("Downloading royalty-free background music...")
@@ -78,17 +90,17 @@ def download_bgm(bgm_path="bgm.mp3"):
 # --- 4. PIPELINE COMPILER ---
 def build_video():
     topic = os.environ.get("VIDEO_TOPIC", "Why kitchen spoons are dangerous for kids medicine and how to take syrup easily")
-    print(f"Generating storyboard for: {topic}")
+    print(f"Generating storyboard for topic: {topic}")
     
     scenes = generate_storyboard(topic)
-    print(f"Generated {len(scenes)} scenes successfully.")
+    print(f"Generated {len(scenes)} scenes.")
     
     download_bgm("bgm.mp3")
     
     clips = []
     
     for idx, sc in enumerate(scenes):
-        print(f"Rendering scene {idx + 1}/{len(scenes)}...")
+        print(f"Processing scene {idx + 1}/{len(scenes)}...")
         audio_path = f"voice_{idx}.mp3"
         image_path = f"frame_{idx}.jpg"
         
@@ -100,29 +112,25 @@ def build_video():
         # 3D Pixar visual generation
         prompt_full = f"{sc['image_prompt']}, 3D Pixar animation, Disney render style, octane 3D render, highly detailed, 9:16 portrait vertical ratio"
         encoded_prompt = requests.utils.quote(prompt_full)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=720&height=1280&nologo=true&seed={idx + 101}"
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=720&height=1280&nologo=true&seed={idx + 2026}"
         
-        # Download image with retry
+        # Download image with retry logic
         for attempt in range(3):
             try:
-                res = requests.get(image_url, timeout=30)
+                res = requests.get(image_url, timeout=35)
                 if res.status_code == 200:
                     with open(image_path, "wb") as f:
                         f.write(res.content)
                     break
             except Exception as e:
-                print(f"Image fetch retry {attempt+1}... ({e})")
+                print(f"Image retry {attempt + 1}: {e}")
                 time.sleep(2)
         
         time.sleep(1)
         
-        # Modern MoviePy v2 Clip construction
+        # Build scene with subtle dynamic zoom
         img_clip = ImageClip(image_path).with_duration(duration)
-        
-        # Gentle dynamic zoom effect
         zoom_clip = img_clip.with_effects([vfx.Resize(lambda t: 1 + 0.04 * (t / duration))])
-        
-        # Attach audio to clip
         clip_with_voice = zoom_clip.with_audio(audio_clip)
         clips.append(clip_with_voice)
         
@@ -130,19 +138,18 @@ def build_video():
     concatenated = concatenate_videoclips(clips, method="compose")
     total_duration = concatenated.duration
     
-    # Mix soft background music (loops and scaled to 8% volume so voice is dominant)
+    # Mix soft background music (8% volume)
     try:
         bgm = AudioFileClip("bgm.mp3").with_volume_scaled(0.08)
-        # Loop music if video is longer than the music track
         if bgm.duration < total_duration:
             num_loops = int(total_duration // bgm.duration) + 1
-            bgm = concatenate_videoclips([bgm] * num_loops)
+            bgm = concatenate_audioclips([bgm] * num_loops)
         bgm = bgm.subclipped(0, total_duration)
         
         final_audio = CompositeAudioClip([concatenated.audio, bgm])
         final_video = concatenated.with_audio(final_audio)
     except Exception as e:
-        print(f"BGM mixing skipped due to error: {e}. Exporting with voiceover only.")
+        print(f"BGM audio mix fallback: {e}")
         final_video = concatenated
 
     print("Encoding final 9:16 MP4...")
