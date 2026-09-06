@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pharmacy Reel Hub</title>
+  
+  <!-- PWA Manifest & Theme -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0284c7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="avatar.png">
+
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; margin: 0; padding: 16px; color: #1e293b; }
     .card { background: white; border-radius: 16px; padding: 20px; max-width: 480px; margin: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
@@ -17,6 +25,7 @@
     .status { font-size: 13px; color: #64748b; margin-top: 12px; font-weight: 500; line-height: 1.4; word-break: break-all; }
     .btn-green { background: #16a34a; }
     .btn-secondary { background: #475569; }
+    .btn-install { background: #0f172a; margin-bottom: 15px; display: none; }
     .settings-toggle { font-size: 12px; color: #94a3b8; text-decoration: underline; cursor: pointer; margin-top: 20px; display: inline-block; }
     #tokenArea { display: none; margin-top: 10px; padding: 10px; background: #f1f5f9; border-radius: 8px; }
   </style>
@@ -24,6 +33,9 @@
 <body>
 
   <div class="card">
+    <!-- PWA One-Tap Install Button -->
+    <button id="pwaInstallBtn" class="btn-install" onclick="triggerPwaInstall()">📲 Install App to Home Screen</button>
+
     <h2>💊 Pharmacy Reel Publisher</h2>
     <p style="font-size: 13px; color: #64748b; margin-top: -5px;">One-stop publishing for Kuching parents & caregivers</p>
 
@@ -66,6 +78,37 @@
   <script>
     const REPO = "WilliamChai1/pharmacy-reel-publisher";
 
+    // --- PWA Installation Registration & Trigger ---
+    let deferredPrompt = null;
+    const installBtn = document.getElementById("pwaInstallBtn");
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(console.error);
+    }
+
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.style.display = "block"; // Reveal button when phone is ready to install
+    });
+
+    async function triggerPwaInstall() {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === "accepted") {
+          installBtn.style.display = "none";
+        }
+        deferredPrompt = null;
+      }
+    }
+
+    window.addEventListener("appinstalled", () => {
+      installBtn.style.display = "none";
+      alert("App installed to home screen!");
+    });
+
+    // --- Core WebApp Scripts ---
     document.getElementById("githubToken").value = localStorage.getItem("gh_pat") || "";
 
     function toggleSettings() {
@@ -117,7 +160,7 @@
       btn.disabled = true;
 
       try {
-        updateStatus("⏳ 1/3 Uploading video to GitHub (takes 10-25s)...");
+        updateStatus("⏳ 1/3 Uploading video file to GitHub (takes 10-25s)...");
         
         const reader = new FileReader();
         reader.readAsDataURL(fileInput);
@@ -158,7 +201,7 @@
             throw new Error(`Upload failed: ${errData.message || 'Check token permissions'}`);
           }
 
-          updateStatus("⏳ 2/3 Video uploaded! Starting cloud render...");
+          updateStatus("⏳ 2/3 Video uploaded! Starting cloud server...");
           
           const dispatchRes = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/process.yml/dispatches`, {
             method: "POST",
@@ -193,7 +236,6 @@
       const interval = setInterval(async () => {
         attempts++;
         try {
-          // Explicitly queries process.yml workflow runs only
           const runsRes = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/process.yml/runs?per_page=1&t=${Date.now()}`, {
             headers: { 
               "Authorization": `Bearer ${token}`,
@@ -213,7 +255,6 @@
               if (latestRun.conclusion === "success") {
                 updateStatus("✅ Complete! Loading direct download link...");
                 
-                // Direct raw MP4 download link via GitHub Releases
                 const downloadUrl = `https://github.com/${REPO}/releases/download/latest/clean_pharmacy_reel.mp4?t=${Date.now()}`;
                 const dlBtn = document.getElementById("directVideoDownload");
                 dlBtn.href = downloadUrl;
