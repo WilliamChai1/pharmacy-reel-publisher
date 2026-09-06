@@ -17,68 +17,97 @@ def process_video(lang="en"):
         sys.exit(1)
 
     total_dur = get_video_duration(input_video)
+    # Cut 3.0s off NotebookLM outro
     cut_duration = max(1.0, total_dur - 3.0)
     trimmed_body = "trimmed_body.mp4"
 
-    # Subtle cyan retention progress bar (8px at top)
+    # 1. Subtle blue retention progress bar at top (8px)
     progress_bar = f"drawbox=y=0:x=0:w='iw*(t/{cut_duration})':h=8:color=0x0284C7@1:t=fill"
 
+    # 2. Perfect Watermark Placement:
+    # "Gemini Notebook" sits at the bottom right.
+    # We place your avatar scaled to 220px at: x=W-w-30, y=H-h-25
     if os.path.exists("avatar.png"):
-        filter_str = f"[1:v]scale=130:130[logo];[0:v][logo]overlay=W-w-25:H-h-160,{progress_bar}"
+        filter_str = (
+            f"[1:v]scale=220:-1[logo];"
+            f"[0:v][logo]overlay=W-w-30:H-h-25,{progress_bar}"
+        )
         cmd_trim = (
             f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} -i avatar.png '
             f'-filter_complex "{filter_str}" '
-            f'-c:v libx264 -preset fast -crf 20 -c:a aac {trimmed_body}'
+            f'-r 30 -c:v libx264 -preset fast -crf 20 '
+            f'-c:a aac -b:a 192k -ar 44100 -ac 2 -async 1 {trimmed_body}'
         )
     else:
         cmd_trim = (
             f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} '
             f'-vf "{progress_bar}" '
-            f'-c:v libx264 -preset fast -crf 20 -c:a aac {trimmed_body}'
+            f'-r 30 -c:v libx264 -preset fast -crf 20 '
+            f'-c:a aac -b:a 192k -ar 44100 -ac 2 -async 1 {trimmed_body}'
         )
-    
-    print("Trimming outro, placing avatar, and adding retention progress bar...")
+
+    print("Step 1: Trimming body, positioning avatar over watermark, syncing audio...")
     subprocess.run(cmd_trim, shell=True, check=True)
 
-    # Stitch intro + body + outro
+    # 3. Standardize Intro and Outro (Standardizes 1080x1920, 30fps, 44.1kHz audio)
     intro_file = f"intro_{lang}.mp4"
     outro_file = f"outro_{lang}.mp4"
 
-    segments = []
-    if os.path.exists(intro_file):
-        segments.append(intro_file)
-    segments.append(trimmed_body)
-    if os.path.exists(outro_file):
-        segments.append(outro_file)
+    segments_to_concat = []
 
+    def standardize_clip(src, dest):
+        # Normalizes resolution, framerate, and audio track so concat never loses sync
+        cmd = (
+            f'ffmpeg -y -i {src} -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 '
+            f'-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1[v];'
+            f'[0:a][1:a]amix=inputs=2:duration=first[a]" '
+            f'-map "[v]" -map "[a]" -r 30 -c:v libx264 -preset fast -crf 20 -c:a aac -b:a 192k -ar 44100 {dest}'
+        )
+        subprocess.run(cmd, shell=True, check=True)
+
+    if os.path.exists(intro_file):
+        print("Standardizing intro...")
+        standardize_clip(intro_file, "norm_intro.mp4")
+        segments_to_concat.append("norm_intro.mp4")
+
+    # Standardize body to ensure matching stream properties
+    print("Standardizing trimmed body...")
+    standardize_clip(trimmed_body, "norm_body.mp4")
+    segments_to_concat.append("norm_body.mp4")
+
+    if os.path.exists(outro_file):
+        print("Standardizing outro...")
+        standardize_clip(outro_file, "norm_outro.mp4")
+        segments_to_concat.append("norm_outro.mp4")
+
+    # 4. Concat normalized segments
     with open("concat_list.txt", "w") as f:
-        for s in segments:
+        for s in segments_to_concat:
             f.write(f"file '{s}'\n")
 
     stitched_temp = "stitched_temp.mp4"
-    cmd_concat = f'ffmpeg -y -f concat -safe 0 -i concat_list.txt -c:v libx264 -preset fast -crf 20 -c:a aac {stitched_temp}'
+    cmd_concat = f'ffmpeg -y -f concat -safe 0 -i concat_list.txt -c:v copy -c:a copy {stitched_temp}'
     subprocess.run(cmd_concat, shell=True, check=True)
 
-    # Mix BGM ducked underneath
+    # 5. Mix Background Music (BGM) ducked at 12%
     final_output = "clean_pharmacy_reel.mp4"
     if os.path.exists("bgm.mp3"):
         cmd_bgm = (
             f'ffmpeg -y -i {stitched_temp} -stream_loop -1 -i bgm.mp3 '
             f'-filter_complex "[1:a]volume=0.12[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]" '
-            f'-map 0:v -map "[aout]" -c:v copy -c:a aac -b:a 192k {final_output}'
+            f'-map 0:v -map "[aout]" -c:v copy -c:a aac -b:a 192k -ar 44100 {final_output}'
         )
         subprocess.run(cmd_bgm, shell=True, check=True)
     else:
         os.rename(stitched_temp, final_output)
 
-    print(f"Video created successfully: {final_output}")
+    print(f"Video finalized successfully: {final_output}")
 
 def generate_caption(topic, lang="en"):
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    
     if not api_key:
-        print("WARNING: GEMINI_API_KEY is empty. Using fallback placeholder caption.")
-        caption_text = f"Health Tip: {topic}\n\nJoin our community: {WHATSAPP_GROUP}\nConsult us at WhatsApp: {WHATSAPP_PHONE}"
+        print("GEMINI_API_KEY is empty. Writing fallback.")
+        caption_text = f"Health Tip: {topic}\n\nJoin our community: {WHATSAPP_GROUP}\nConsult us on WhatsApp: {WHATSAPP_PHONE}"
         with open("caption.txt", "w", encoding="utf-8") as f:
             f.write(caption_text)
         return
@@ -124,7 +153,7 @@ def generate_caption(topic, lang="en"):
         """
 
     caption_text = ""
-    # 1. Primary: gemini-3.5-flash-lite
+    # Primary: gemini-3.5-flash-lite
     try:
         print("Calling Primary Model: gemini-3.5-flash-lite...")
         res = client.models.generate_content(
@@ -135,7 +164,6 @@ def generate_caption(topic, lang="en"):
         print("Primary model succeeded.")
     except Exception as e1:
         print(f"Primary model failed: {e1}. Switching to secondary: gemini-3.5-flash...")
-        # 2. Secondary fallback: gemini-3.5-flash
         try:
             res = client.models.generate_content(
                 model="gemini-3.5-flash",
