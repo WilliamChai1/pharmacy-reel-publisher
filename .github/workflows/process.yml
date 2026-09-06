@@ -34,6 +34,14 @@ jobs:
         run: |
           pip install google-genai
 
+      - name: Check Input File Exists
+        run: |
+          if [ ! -f "input.mp4" ]; then
+            echo "ERROR: input.mp4 was not uploaded to the repository!"
+            exit 1
+          fi
+          ls -lh input.mp4
+
       - name: Run Pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -47,6 +55,7 @@ jobs:
         with:
           name: clean_pharmacy_reel
           path: clean_pharmacy_reel.mp4
+          if-no-files-found: error
           retention-days: 5
 
       - name: Upload Caption Artifact
@@ -54,4 +63,5 @@ jobs:
         with:
           name: facebook_caption
           path: caption.txt
+          if-no-files-found: error
           retention-days: 5
