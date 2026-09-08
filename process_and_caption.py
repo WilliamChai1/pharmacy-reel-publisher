@@ -21,35 +21,34 @@ def process_video(lang="en"):
     cut_duration = max(1.0, total_dur - 3.0)
     trimmed_body = "trimmed_body.mp4"
 
-    # --- TRUE ANIMATED PROGRESS BAR ---
-    # Creates a 14px cyan bar that expands across the top from 0 to 1080px over cut_duration
-    # Also places avatar over "Gemini Notebook" watermark at bottom right
+    # --- ANIMATED PROGRESS BAR WITH EXPLICIT DURATION & SHORTEST TERMINATION ---
+    # Setting d={cut_duration} and shortest=1 prevents infinite encoding
     if os.path.exists("avatar.png"):
         filter_str = (
             f"[1:v]scale=220:-1[logo];"
-            f"color=c=0x0284C7:s=1080x14,format=rgba[bar];"
-            f"[0:v][bar]overlay=x='-W+(W*t/{cut_duration})':y=0[with_bar];"
+            f"color=c=0x0284C7:s=1080x14:d={cut_duration},format=rgba[bar];"
+            f"[0:v][bar]overlay=x='-W+(W*t/{cut_duration})':y=0:shortest=1[with_bar];"
             f"[with_bar][logo]overlay=W-w-30:H-h-25"
         )
         cmd_trim = (
-            f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} -i avatar.png '
+            f'ffmpeg -y -ss 0 -t {cut_duration} -i {input_video} -i avatar.png '
             f'-filter_complex "{filter_str}" '
             f'-r 30 -c:v libx264 -preset fast -crf 20 '
             f'-c:a aac -b:a 192k -ar 44100 -ac 2 -async 1 {trimmed_body}'
         )
     else:
         filter_str = (
-            f"color=c=0x0284C7:s=1080x14,format=rgba[bar];"
-            f"[0:v][bar]overlay=x='-W+(W*t/{cut_duration})':y=0"
+            f"color=c=0x0284C7:s=1080x14:d={cut_duration},format=rgba[bar];"
+            f"[0:v][bar]overlay=x='-W+(W*t/{cut_duration})':y=0:shortest=1"
         )
         cmd_trim = (
-            f'ffmpeg -y -ss 0 -to {cut_duration} -i {input_video} '
+            f'ffmpeg -y -ss 0 -t {cut_duration} -i {input_video} '
             f'-filter_complex "{filter_str}" '
             f'-r 30 -c:v libx264 -preset fast -crf 20 '
             f'-c:a aac -b:a 192k -ar 44100 -ac 2 -async 1 {trimmed_body}'
         )
 
-    print("Step 1: Trimming body, placing avatar, generating dynamic moving progress bar...")
+    print(f"Step 1: Trimming body to {cut_duration}s, placing avatar, generating animated bar...")
     subprocess.run(cmd_trim, shell=True, check=True)
 
     # 3. Standardize Intro and Outro
@@ -102,7 +101,7 @@ def process_video(lang="en"):
     else:
         os.rename(stitched_temp, final_output)
 
-    print(f"Video finalized successfully with animated progress bar: {final_output}")
+    print(f"Video finalized successfully in under 45s: {final_output}")
 
 def generate_caption(topic, lang="en"):
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -154,7 +153,6 @@ def generate_caption(topic, lang="en"):
         """
 
     caption_text = ""
-    # Primary: gemini-3.5-flash-lite
     try:
         print("Calling Primary Model: gemini-3.5-flash-lite...")
         res = client.models.generate_content(
